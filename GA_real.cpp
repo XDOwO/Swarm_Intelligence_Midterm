@@ -101,7 +101,7 @@ public:
                 best_one = ind;
             }
         }
-        uniform_int_distribution pick(0,pop_size-1);
+        uniform_int_distribution<int> pick(0,pop_size-1);
         while(eval_amt){
             vector<individual> new_population;
             while(new_population.size() < pop_size && eval_amt){
