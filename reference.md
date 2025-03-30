@@ -1,0 +1,1 @@
+[Genetic Algorithms for Real Parameter Optimization]https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=bafd83a5660e1fb3bbf799e602e45e7bd28fb56b
