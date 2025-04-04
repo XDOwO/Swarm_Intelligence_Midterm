@@ -120,14 +120,11 @@ public:
                     isDiv = false;
                 }
 
-                gene_t trial(dim);
-                int R = uniform_int_distribution<int>(0,pop_size-1)(gen);
+                gene_t trial = population[i].genes;
+                int R = uniform_int_distribution<int>(0,dim-1)(gen);
                 for(int j=0;j<dim;++j){
                     if(dis(gen) < CR || j==R){
                         trial[j] = mutant[j];
-                    }
-                    else{
-                        trial[j] = population[i].genes[j];
                     }
                 }
 
@@ -151,6 +148,7 @@ public:
 
             }
             if((ns1*(ns2+nf2) + ns2*(ns1+nf1)) != 0)p = ns1*(ns2+nf2) / (ns1*(ns2+nf2) + ns2*(ns1+nf1));
+            p = min(0.999,max(0.001,p));
             if(!CRv.empty()){
                 CRm = accumulate(CRv.begin(),CRv.end(),0.0) / CRv.size();
                 CRv.clear();
@@ -163,7 +161,7 @@ public:
 
 mutex io_mutex;
 
-void run_task(int func_num, int dim, const string& func_name) {
+void run_task(int func_num, int dim,int times, const string& func_name) {
     double sm = 0;
     double mn = numeric_limits<double>::max();
     string filename = "./" + func_name + "_" + to_string(dim) + "D.txt";
@@ -185,7 +183,7 @@ void run_task(int func_num, int dim, const string& func_name) {
         sm += res;
         mn = min(res,mn);
     }
-    f << "Avg:" << sm / 30 << endl;
+    f << "Avg:" << sm / times << endl;
     f << "Min:" << mn << endl;
     f.close();
     lock_guard<mutex> lock(io_mutex);
@@ -200,9 +198,11 @@ int main(int argc, char** argv){
 
     for (int func_num = 1; func_num <= 6; ++func_num) {
         for (auto& dim : dims) {
-            threads.emplace_back(run_task, func_num, dim, func_names[func_num - 1]);
+            threads.emplace_back(run_task, func_num, dim, 30, func_names[func_num - 1]);
         }
     }
+    
+    // threads.emplace_back(run_task, 2, 30, 1, func_names[1]);
 
     for (auto& t : threads) {
         t.join();
