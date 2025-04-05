@@ -177,7 +177,6 @@ void run_task(int func_num, int dim,int times, const string& func_name) {
         double res = SADE_.apply();
         {
             lock_guard<mutex> lock(io_mutex);
-            cout << "f" << func_num << " (" << dim << "D), run " << i+1 << ": " << res << endl;
         }
         f << res << endl;
         sm += res;
