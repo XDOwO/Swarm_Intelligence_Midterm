@@ -242,14 +242,14 @@ class SADE {
             }
             if ((ns1 * (ns2 + nf2) + ns2 * (ns1 + nf1)) != 0)
                 p = ns1 * (ns2 + nf2) / (ns1 * (ns2 + nf2) + ns2 * (ns1 + nf1));
-            p = min(0.999, max(0.001, p));
+            p = min(0.99, max(0.01, p));
             if (!CRv.empty()) {
                 CRm = accumulate(CRv.begin(), CRv.end(), 0.0) / CRv.size();
                 CRv.clear();
             }
 
             if (gap >= gap_threhold) {
-                if (generation < tot_amt / pop_size * 0.75) {
+                if (generation < tot_amt / pop_size * 0.8) {
                     for (int i = 0; i < 20; ++i) {
                         for (auto &x : new_population[i].genes) {
                             x = dis_range(gen);
