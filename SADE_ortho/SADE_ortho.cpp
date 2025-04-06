@@ -169,6 +169,8 @@ public:
         double p=0.5;
         vector<double> CRv;
         int generation = 1;
+        int gap = 0;
+        int gap_threhold = 1000;
         bool hasChangedBasis = false;
         while(eval_amt){
             vector<individual> new_population;
@@ -209,12 +211,13 @@ public:
                 }
 
                 double fitness = evaluate(trial);
-
+                ++gap;
                 if(fitness < population[i].fitness){
                     new_population.push_back({trial,fitness});
                     if(fitness < best_fitness){
                         best_fitness = fitness;
                         best_one = {trial,fitness};
+                        gap = 0;
                     }
                     if(isDiv) ++ns1;
                     else ++ns2;
@@ -233,7 +236,17 @@ public:
                 CRm = accumulate(CRv.begin(),CRv.end(),0.0) / CRv.size();
                 CRv.clear();    
             }
-            if(generation==(tot_amt/pop_size*0.5)){
+
+            if(gap >= gap_threhold){
+                for(int i=0;i<10;++i){
+                    for(auto& x:new_population[i].genes){
+                        x = dis_range(gen);
+                    }
+                }
+                gap = 0;
+            }
+
+            if(gap >= gap_threhold && generation >= tot_amt/pop_size*0.75){
                 ranges::sort(new_population, {}, &individual::fitness);
                 matrix_t new_basis(dim);
                 new_basis[0] = best_one.genes;
@@ -246,10 +259,11 @@ public:
                 }
                 basis = move(new_basis);
                 hasChangedBasis = true;
-                p = 0.5;
-                CRm = 0.5;
-                CRv.clear();
+                // p = 0.5;
+                // CRm = 0.5;
+                // CRv.clear();
             }
+            
             ++generation;
             population = new_population;
 
