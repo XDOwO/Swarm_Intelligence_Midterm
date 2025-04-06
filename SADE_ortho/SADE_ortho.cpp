@@ -264,7 +264,7 @@ class SADE {
                     for (int i = 1; i < dim; ++i) {
                         new_basis[i] = new_population[i - 1].genes;
                     }
-                    new_basis = orthogonalize(new_basis, dim)
+                    new_basis = orthogonalize(new_basis, dim);
                     for (auto &v : new_population) {
                         v.genes = matvec(transpose(new_basis),
                                          matvec(basis, v.genes));
