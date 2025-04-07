@@ -13,7 +13,7 @@
 
 using namespace std;
 using gene_t = vector<double>;
-class SADE {
+class JADE {
   public:
     double minF;
     double maxF;
@@ -22,7 +22,11 @@ class SADE {
     int eval_amt;
     int tot_amt;
     int func_num;
+    double P;
     double CRm;
+    double Fm;
+    double Ftau;
+    double CRtau;
     double lower_bound;
     double upper_bound;
     random_device rd;
@@ -36,9 +40,12 @@ class SADE {
         gene_t genes;
         double fitness;
     };
-    SADE(int d, int func_num_) {
+    JADE(int d, int func_num_) {
         pop_size = 50;
         CRm = 0.5;
+        Fm = 0.5;
+        Ftau = 0.1;
+        CRtau = 0.1;
         gen = mt19937_64(rd());
         dis = uniform_real_distribution<>(0.0, 1.0);
         dim = d;
@@ -46,21 +53,7 @@ class SADE {
         set_search_bound(&upper_bound, &lower_bound, func_num);
         minF = 0.0001;
         maxF = 2;
-        dis_range = uniform_real_distribution<>(lower_bound, upper_bound);
-        eval_amt = 10000 * dim;
-        tot_amt = eval_amt;
-    }
-    SADE(int pop_size_, double minF_, double maxF_, double CRm_, int func_num_,
-         int d) {
-        pop_size = pop_size_;
-        minF = minF_;
-        maxF = maxF_;
-        CRm = CRm_;
-        gen = mt19937_64(rd());
-        dis = uniform_real_distribution<>(0.0, 1.0);
-        func_num = func_num_;
-        dim = d;
-        set_search_bound(&upper_bound, &lower_bound, func_num);
+        P = 0.1;
         dis_range = uniform_real_distribution<>(lower_bound, upper_bound);
         eval_amt = 10000 * dim;
         tot_amt = eval_amt;
@@ -71,19 +64,11 @@ class SADE {
         --eval_amt;
         return fitness;
     }
-    vector<individual> select_k_unique(const vector<individual> &population,
-                                       int k) {
-        vector<individual> result;
-        random_device rd;
-        mt19937 gen(rd());
-
-        sample(population.begin(), population.end(), back_inserter(result), k,
-               gen);
-        return result;
-    }
     double apply() {
         vector<individual> population(pop_size);
+        vector<individual> archive;
         individual best_one;
+
         double best_fitness = numeric_limits<double>::max();
         for (auto &ind : population) {
             ind.genes.resize(dim);
@@ -96,75 +81,87 @@ class SADE {
                 best_one = ind;
             }
         }
-        double p = 0.5;
+
         vector<double> CRv;
+        vector<double> Fv;
         while (eval_amt) {
             vector<individual> new_population;
-            double ns1 = 0, ns2 = 0, nf1 = 0, nf2 = 0;
-            for (int i = 0; i < pop_size && eval_amt > 0; ++i) {
-                auto vec = select_k_unique(population, 3);
-                individual a = vec[0];
-                individual b = vec[1];
-                individual c = vec[2];
-                gene_t mutant(dim);
-                bool isDiv = true;
+            vector<int> nums(pop_size, 0);
+            iota(nums.begin(), nums.end(), 0);
+            ranges::sort(nums, [&](int i, int j) {
+                return population[i].fitness <
+                       population[j].fitness; // sort by fitness
+            });
 
+            for (int i = 0; i < pop_size && eval_amt > 0; ++i) {
+                 
+                gene_t mutant(dim);
                 norm_cr = normal_distribution<double>(CRm, 0.1);
-                norm_f = normal_distribution<double>(0.5, 0.3);
+                norm_f = normal_distribution<double>(Fm, 0.3);
                 double CR = min(1.0, max(0.0, norm_cr(gen)));
                 double F = min(maxF, max(minF, norm_f(gen)));
+                int pidx = nums[uniform_int_distribution<int>(0, max(1,int(P*pop_size)))(gen)];
+                 
+                individual& pi = population[i];
+                individual& pbest =  population[pidx];
 
-                if (dis(gen) < p) { // tend to diverge
-                    for (int j = 0; j < dim; ++j) {
-                        mutant[j] =
-                            bound(a.genes[j] + F * (b.genes[j] - c.genes[j]));
-                    }
-                    isDiv = true;
-                } else { // tend to converge
-                    for (int j = 0; j < dim; ++j) {
-                        mutant[j] = bound(
-                            population[i].genes[j] +
-                            F * (best_one.genes[j] - population[i].genes[j]) +
-                            F * (a.genes[j] - b.genes[j]));
-                    }
-                    isDiv = false;
+                int a = i;
+                int b = i;
+                while (a == i) {
+                    a = uniform_int_distribution<int>(0, pop_size - 1)(gen);
+                }
+                while(b == i || b == a) {
+                    b = uniform_int_distribution<int>(0, pop_size - 1 + archive.size())(gen);
                 }
 
-                gene_t trial = population[i].genes;
+                individual &pa = population[a];
+                individual &pb = b < pop_size ? population[b] : archive[b - pop_size];
+
+                for(int j=0;j<dim;j++){
+                    mutant[j] = pi.genes[j] + F * (pbest.genes[j] - pi.genes[j]) +
+                                 F * (pa.genes[j] - pb.genes[j]);
+                    mutant[j] = bound(mutant[j]);
+                }
+
+                gene_t trial = pi.genes;
                 int R = uniform_int_distribution<int>(0, dim - 1)(gen);
                 for (int j = 0; j < dim; ++j) {
                     if (dis(gen) < CR || j == R) {
                         trial[j] = mutant[j];
                     }
                 }
+                
+
 
                 double fitness = evaluate(trial);
 
                 if (fitness < population[i].fitness) {
                     new_population.push_back({trial, fitness});
+                    archive.push_back(population[i]);
                     if (fitness < best_fitness) {
                         best_fitness = fitness;
                         best_one = {trial, fitness};
                     }
-                    if (isDiv)
-                        ++ns1;
-                    else
-                        ++ns2;
                     CRv.push_back(CR);
+                    Fv.push_back(F);
                 } else {
                     new_population.push_back(population[i]);
-                    if (isDiv)
-                        ++nf1;
-                    else
-                        ++nf2;
                 }
             }
-            if ((ns1 * (ns2 + nf2) + ns2 * (ns1 + nf1)) != 0)
-                p = ns1 * (ns2 + nf2) / (ns1 * (ns2 + nf2) + ns2 * (ns1 + nf1));
-            p = min(0.999, max(0.001, p));
+
             if (!CRv.empty()) {
-                CRm = accumulate(CRv.begin(), CRv.end(), 0.0) / CRv.size();
-                CRv.clear();
+                double Fsum = 0, F2sum = 0;
+                for(auto &f : Fv) {
+                    Fsum += f;
+                    F2sum += f * f;
+                }
+                Fm = (1 - Ftau) * Fm + Ftau * (F2sum / Fsum);
+
+                double CRsum = accumulate(CRv.begin(), CRv.end(), 0.0);
+                CRm = (1 - CRtau) * CRm + CRtau * (CRsum / CRv.size());
+            }
+            if(archive.size() > pop_size) {
+                archive.erase(archive.begin(), archive.begin() + (archive.size() - pop_size));
             }
             population = new_population;
         }
@@ -184,11 +181,13 @@ void run_task(int func_num, int dim, int times, const string &func_name) {
         cerr << "Cannot open file: " << filename << endl;
         return;
     }
-
+    {
+        lock_guard<mutex> lock(io_mutex);
+        cout << func_name << " with " << dim << " has started." << endl;
+    }
     for (int i = 0; i < 30; ++i) {
-        SADE SADE_(dim, func_num);
-        double res = SADE_.apply();
-        { lock_guard<mutex> lock(io_mutex); }
+        JADE JADE_(dim, func_num);
+        double res = JADE_.apply();
         f << res << endl;
         sm += res;
         mn = min(res, mn);
@@ -198,7 +197,8 @@ void run_task(int func_num, int dim, int times, const string &func_name) {
     f.close();
     lock_guard<mutex> lock(io_mutex);
     cout << "Fitness Function " << func_name << " with dimension " << dim
-         << " has average fitness " << sm / 30.0 << " after 30 runs" << endl;
+         << " has average fitness " << sm / times << " and has minimum fitness "
+         << mn << " after " << times << " runs" << endl;
 }
 
 int main(int argc, char **argv) {
@@ -222,3 +222,4 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+
