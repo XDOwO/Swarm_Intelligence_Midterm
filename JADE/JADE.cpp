@@ -52,7 +52,7 @@ class JADE {
         func_num = func_num_;
         set_search_bound(&upper_bound, &lower_bound, func_num);
         minF = 0.0001;
-        maxF = 2;
+        maxF = 1;
         P = 0.1;
         dis_range = uniform_real_distribution<>(lower_bound, upper_bound);
         eval_amt = 10000 * dim;
@@ -213,7 +213,6 @@ int main(int argc, char **argv) {
                                  func_names[func_num - 1]);
         }
     }
-
     // threads.emplace_back(run_task, 2, 30, 1, func_names[1]);
 
     for (auto &t : threads) {

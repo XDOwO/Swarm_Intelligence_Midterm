@@ -3,23 +3,20 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <random>
 #include <string>
 #include <thread>
 #include <vector>
-#include <numeric>
-#include <utility>
 
-#include "../test_function.h"
 #include "../matrix_utility.h"
+#include "../test_function.h"
 
 using namespace std;
 using gene_t = vector<double>;
 using matrix_t = vector<gene_t>;
 
-
-
-class SADE {
+class JADE {
   public:
     double minF;
     double maxF;
@@ -28,7 +25,11 @@ class SADE {
     int eval_amt;
     int tot_amt;
     int func_num;
+    double P;
     double CRm;
+    double Fm;
+    double CRtau;
+    double Ftau;
     double lower_bound;
     double upper_bound;
     random_device rd;
@@ -43,16 +44,20 @@ class SADE {
         gene_t genes;
         double fitness;
     };
-    SADE(int d, int func_num_) {
+    JADE(int d, int func_num_) {
         pop_size = 50;
         CRm = 0.5;
+        Fm = 0.5;
+        P = 0.1;
+        CRtau = 0.1;
+        Ftau = 0.1;
         gen = mt19937_64(rd());
         dis = uniform_real_distribution<>(0.0, 1.0);
         dim = d;
         func_num = func_num_;
         set_search_bound(&upper_bound, &lower_bound, func_num);
         minF = 0.0001;
-        maxF = 2;
+        maxF = 1;
         dis_range = uniform_real_distribution<>(lower_bound, upper_bound);
         eval_amt = 10000 * dim;
         tot_amt = eval_amt;
@@ -81,61 +86,78 @@ class SADE {
 
     double apply() {
         vector<individual> population(pop_size);
+        vector<individual> archive;
+        vector<individual> bests;
         individual best_one;
+        int gap = 0;
+        int gap_threhold = 1000;
+        int generation = 1;
         double best_fitness = numeric_limits<double>::max();
         for (auto &ind : population) {
             ind.genes.resize(dim);
             for (auto &gene : ind.genes) {
                 gene = dis_range(gen);
             }
+        }
+        for (auto &ind : population) {
+            // ind.genes = matvec(transpose(basis), ind.genes);
             ind.fitness = evaluate(ind.genes);
             best_fitness = min(ind.fitness, best_fitness);
             if (best_fitness == ind.fitness) {
                 best_one = ind;
             }
         }
-        double p = 0.5;
         vector<double> CRv;
-        int generation = 1;
-        int gap = 0;
-        int gap_threhold = 1000;
-        bool hasChangedBasis = false;
+        vector<double> Fv;
         while (eval_amt) {
             vector<individual> new_population;
-            double ns1 = 0, ns2 = 0, nf1 = 0, nf2 = 0;
+            vector<int> nums(pop_size, 0);
+            iota(nums.begin(), nums.end(), 0);
+            ranges::sort(nums, [&](int i, int j) {
+                return population[i].fitness <
+                       population[j].fitness; // sort by fitness
+            });
+            bool ChangeBasisFlag = true;
             for (int i = 0; i < pop_size && eval_amt > 0; ++i) {
-                auto vec = select_k_unique(population, 3);
-                individual a = std::move(vec[0]);
-                individual b = std::move(vec[1]);
-                individual c = std::move(vec[2]);
-                gene_t mutant(dim);
-                bool isDiv = true;
 
+                gene_t mutant(dim);
                 norm_cr = normal_distribution<double>(CRm, 0.1);
-                norm_f = normal_distribution<double>(0.5, 0.3);
+                norm_f = normal_distribution<double>(Fm, 0.3);
                 double CR = min(1.0, max(0.0, norm_cr(gen)));
                 double F = min(maxF, max(minF, norm_f(gen)));
+                int pidx = nums[uniform_int_distribution<int>(
+                    0, max(1, int(P * pop_size)))(gen)];
 
-                if (dis(gen) < p) { // tend to diverge
-                    for (int j = 0; j < dim; ++j) {
-                        mutant[j] =
-                            bound(a.genes[j] + F * (b.genes[j] - c.genes[j]));
-                        // mutant[j] = bound(a.genes[j] + F * b.genes[j]);
-                    }
-                    isDiv = true;
-                } else { // tend to converge
-                    for (int j = 0; j < dim; ++j) {
-                        mutant[j] = bound(
-                            population[i].genes[j] +
-                            F * (best_one.genes[j] - population[i].genes[j]) +
-                            F * (a.genes[j] - b.genes[j]));
-                        // mutant[j] = bound(population[i].genes[j] + F *
-                        // (best_one.genes[j]
-                        // - population[i].genes[j]));
-                    }
-                    isDiv = false;
+                individual &pi = population[i];
+                individual &pbest = population[pidx];
+
+                int a = i;
+                int b = i;
+                while (a == i) {
+                    a = uniform_int_distribution<int>(0, pop_size - 1)(gen);
                 }
-                gene_t trial = population[i].genes;
+                while (b == i || b == a) {
+                    b = uniform_int_distribution<int>(
+                        0, pop_size - 1 + archive.size())(gen);
+                }
+
+                individual &pa = population[a];
+                individual &pb =
+                    b < pop_size ? population[b] : archive[b - pop_size];
+
+                for (int j = 0; j < dim; j++) {
+                    mutant[j] = pi.genes[j] +
+                                F * (pbest.genes[j] - pi.genes[j]) +
+                                F * (pa.genes[j] - pb.genes[j]);
+                }
+
+                mutant = std::move(matvec(basis, mutant));
+                for (auto &x : mutant) {
+                    x = bound(x);
+                }
+                mutant = std::move(matvec(transpose(basis), mutant));
+
+                gene_t trial = pi.genes;
                 int R = uniform_int_distribution<int>(0, dim - 1)(gen);
                 for (int j = 0; j < dim; ++j) {
                     if (dis(gen) < CR || j == R) {
@@ -147,64 +169,50 @@ class SADE {
                 ++gap;
                 if (fitness < population[i].fitness) {
                     new_population.push_back({trial, fitness});
+                    archive.push_back(population[i]);
                     if (fitness < best_fitness) {
                         best_fitness = fitness;
                         best_one = {trial, fitness};
+                        bests.push_back(best_one);
                         gap = 0;
                     }
-                    if (isDiv)
-                        ++ns1;
-                    else
-                        ++ns2;
                     CRv.push_back(CR);
+                    Fv.push_back(F);
                 } else {
                     new_population.push_back(population[i]);
-                    if (isDiv)
-                        ++nf1;
-                    else
-                        ++nf2;
                 }
             }
-            if ((ns1 * (ns2 + nf2) + ns2 * (ns1 + nf1)) != 0)
-                p = ns1 * (ns2 + nf2) / (ns1 * (ns2 + nf2) + ns2 * (ns1 + nf1));
-            p = min(0.99, max(0.01, p));
-            if (!CRv.empty()) {
-                CRm = accumulate(CRv.begin(), CRv.end(), 0.0) / CRv.size();
-                CRv.clear();
-            }
-
-            if (gap >= gap_threhold) {
-                if (generation < tot_amt / pop_size * 0.8) {
-                    for (int i = 0; i < 20; ++i) {
-                        for (auto &x : new_population[i].genes) {
-                            x = dis_range(gen);
-                        }
-                    }
+            if (generation % int(tot_amt / pop_size * 0.75) == 0) {
+                matrix_t new_basis(dim);
+                for (int i = 0; i < dim; ++i) {
+                    new_basis[i] = bests[bests.size()-1-i].genes;
                 }
-
-                else {
-                    ranges::sort(new_population, {}, &individual::fitness);
-                    matrix_t new_basis(dim);
-                    new_basis[0] = best_one.genes;
-                    for (int i = 1; i < dim; ++i) {
-                        new_basis[i] = new_population[i - 1].genes;
-                    }
-                    new_basis = orthogonalize(new_basis, dim);
-                    for (auto &v : new_population) {
-                        v.genes = matvec(transpose(new_basis),
-                                         matvec(basis, v.genes));
-                    }
-                    basis = std::move(new_basis);
-                    hasChangedBasis = true;
-                    // p = 0.5;
-                    // CRm = 0.5;
-                    // CRv.clear();
+                new_basis = orthogonalize(new_basis, dim);
+                for (auto &v : new_population) {
+                    v.genes = matvec(transpose(new_basis),
+                                        matvec(basis, v.genes));
                 }
+                basis = std::move(new_basis);
                 gap = 0;
+                ChangeBasisFlag = true;
             }
+            if (!CRv.empty()) {
+                double Fsum = 0, F2sum = 0;
+                for (auto &f : Fv) {
+                    Fsum += f;
+                    F2sum += f * f;
+                }
+                Fm = (1 - Ftau) * Fm + Ftau * (F2sum / Fsum);
 
-            ++generation;
+                double CRsum = accumulate(CRv.begin(), CRv.end(), 0.0);
+                CRm = (1 - CRtau) * CRm + CRtau * (CRsum / CRv.size());
+            }
+            if (archive.size() > pop_size) {
+                archive.erase(archive.begin(),
+                              archive.begin() + (archive.size() - pop_size));
+            }
             population = new_population;
+            ++generation;
         }
         return best_fitness;
     }
@@ -227,8 +235,8 @@ void run_task(int func_num, int dim, int times, const string &func_name) {
         cout << func_name << " with " << dim << " has started." << endl;
     }
     for (int i = 0; i < times; ++i) {
-        SADE SADE_(dim, func_num);
-        double res = SADE_.apply();
+        JADE JADE_(dim, func_num);
+        double res = JADE_.apply();
         {
             lock_guard<mutex> lock(io_mutex);
             f << res << endl;
