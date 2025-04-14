@@ -37,7 +37,7 @@ class JADE {
     uniform_real_distribution<> dis;
     uniform_real_distribution<> dis_range;
     normal_distribution<double> norm_cr;
-    normal_distribution<double> norm_f;
+    cauchy_distribution<double> norm_f;
     matrix_t basis;
 
     struct individual {
@@ -122,7 +122,7 @@ class JADE {
 
                 gene_t mutant(dim);
                 norm_cr = normal_distribution<double>(CRm, 0.1);
-                norm_f = normal_distribution<double>(Fm, 0.3);
+                norm_f = cauchy_distribution<double>(Fm, 0.1);
                 double CR = min(1.0, max(0.0, norm_cr(gen)));
                 double F = min(maxF, max(minF, norm_f(gen)));
                 int pidx = nums[uniform_int_distribution<int>(
@@ -189,6 +189,10 @@ class JADE {
                 }
                 new_basis = orthogonalize(new_basis, dim);
                 for (auto &v : new_population) {
+                    v.genes = matvec(transpose(new_basis),
+                                        matvec(basis, v.genes));
+                }
+                for (auto &v : archive) {
                     v.genes = matvec(transpose(new_basis),
                                         matvec(basis, v.genes));
                 }

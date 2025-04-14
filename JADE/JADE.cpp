@@ -34,7 +34,7 @@ class JADE {
     uniform_real_distribution<> dis;
     uniform_real_distribution<> dis_range;
     normal_distribution<double> norm_cr;
-    normal_distribution<double> norm_f;
+    cauchy_distribution<double> norm_f;
 
     struct individual {
         gene_t genes;
@@ -97,7 +97,7 @@ class JADE {
                  
                 gene_t mutant(dim);
                 norm_cr = normal_distribution<double>(CRm, 0.1);
-                norm_f = normal_distribution<double>(Fm, 0.3);
+                norm_f = cauchy_distribution<double>(Fm, 0.1);
                 double CR = min(1.0, max(0.0, norm_cr(gen)));
                 double F = min(maxF, max(minF, norm_f(gen)));
                 int pidx = nums[uniform_int_distribution<int>(0, max(1,int(P*pop_size)))(gen)];
@@ -135,7 +135,7 @@ class JADE {
 
                 double fitness = evaluate(trial);
 
-                if (fitness < population[i].fitness) {
+                if (fitness <= population[i].fitness) {
                     new_population.push_back({trial, fitness});
                     archive.push_back(population[i]);
                     if (fitness < best_fitness) {

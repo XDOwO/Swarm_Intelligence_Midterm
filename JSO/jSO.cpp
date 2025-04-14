@@ -15,105 +15,110 @@
 using namespace std;
 using gene_t = vector<double>;
 
+
 class JSO {
 public:
     int dim;
-    int func_num;
+    int init_pop_size;
+    int pop_size;
     int eval_amt;
     int tot_amt;
-    int pop_size;
-    int min_pop_size = 4;
-    int memory_size = 5;
+    int func_num;
+    int min_pop_size;
+    int memory_size;
     int arc_size;
-    double lower_bound, upper_bound;
-    double epsilon = 1e-8;
-    double p_best_rate = 0.25;
-    double arc_rate = 1.0;
+    double lower_bound;
+    double upper_bound;
+    double p_best_rate;
+    double arc_rate;
 
-    vector<double> M_F;
-    vector<double> M_CR;
-    int memory_pos = 0;
+    vector<double> MF, MCR;
+    int H_idx = 0;
+
+    random_device rd;
+    mt19937_64 gen;
+    uniform_real_distribution<> dis;
+    uniform_real_distribution<> dis_range;
 
     struct individual {
         gene_t genes;
         double fitness;
     };
 
-    vector<individual> population;
-    vector<individual> archive;
-
-    random_device rd;
-    mt19937_64 gen;
-    uniform_real_distribution<> dis;
-    uniform_real_distribution<> dis_range;
-    normal_distribution<double> norm_dist;
-
-    JSO(int d, int fnum) : dim(d), func_num(fnum), gen(rd()), dis(0.0, 1.0), norm_dist(0.0, 1.0) {
+    JSO(int d, int func_num_) {
+        dim = d;
+        func_num = func_num_;
+        gen = mt19937_64(rd());
+        dis = uniform_real_distribution<>(0.0, 1.0);
         set_search_bound(&upper_bound, &lower_bound, func_num);
         dis_range = uniform_real_distribution<>(lower_bound, upper_bound);
-        pop_size = int(round(sqrt(dim) * log(dim) * 25));
-        arc_size = int(round(pop_size * arc_rate));
+
+        pop_size = (int)round(sqrt(dim) * log(dim) * 25);
+        init_pop_size = pop_size;
+        min_pop_size = 4;
+        memory_size = 5;
+        arc_rate = 1.4;
+        arc_size = (int)(pop_size) * arc_rate;
+        p_best_rate = 0.4;
         eval_amt = 10000 * dim;
         tot_amt = eval_amt;
 
-        M_F = vector<double>(memory_size, 0.3);
-        M_CR = vector<double>(memory_size, 0.8);
+        MF.assign(memory_size, 0.3);
+        MCR.assign(memory_size, 0.8);
+    }
 
-        for (int i = 0; i < pop_size; ++i) {
-            individual ind;
-            ind.genes.resize(dim);
-            for (auto &x : ind.genes)
-                x = dis_range(gen);
-            ind.fitness = evaluate(ind.genes);
-            population.push_back(ind);
-        }
+    double bound(double val, double parent) {
+        if (val < lower_bound)
+            return (val + parent) / 2.0;
+        if (val > upper_bound)
+            return (val + parent) / 2.0;
+        return val;
     }
 
     double evaluate(const gene_t &x) {
+        double fitness = calculate_test_function(x.data(), dim, func_num);
         --eval_amt;
-        return calculate_test_function(x.data(), dim, func_num);
-    }
-
-    gene_t bound(const gene_t &child, const gene_t &parent) {
-        gene_t result = child;
-        for (int i = 0; i < dim; ++i) {
-            if (result[i] < lower_bound)
-                result[i] = (lower_bound + parent[i]) / 2.0;
-            else if (result[i] > upper_bound)
-                result[i] = (upper_bound + parent[i]) / 2.0;
-        }
-        return result;
+        return fitness;
     }
 
     double apply() {
+        vector<individual> population(pop_size);
+        vector<individual> archive;
+
+        for (auto &ind : population) {
+            ind.genes.resize(dim);
+            for (auto &gene : ind.genes)
+                gene = dis_range(gen);
+            ind.fitness = evaluate(ind.genes);
+        }
+
         individual best_one = *min_element(population.begin(), population.end(),
             [](const individual &a, const individual &b) { return a.fitness < b.fitness; });
 
-        vector<double> S_F, S_CR, delta_f;
-
-        while (eval_amt > 0 && pop_size > 2) {
-            vector<individual> new_population;
+        while (eval_amt > 0 && pop_size > min_pop_size) {
             vector<int> sorted_idx(pop_size);
             iota(sorted_idx.begin(), sorted_idx.end(), 0);
-            sort(sorted_idx.begin(), sorted_idx.end(), [&](int a, int b) {
+            ranges::sort(sorted_idx, [&](int a, int b) {
                 return population[a].fitness < population[b].fitness;
             });
 
             int p_num = max(2, min(pop_size, int(round(pop_size * p_best_rate))));
+            vector<individual> new_population;
+            vector<double> S_F, S_CR, delta_fitness;
 
             for (int i = 0; i < pop_size && eval_amt > 0; ++i) {
                 int r = uniform_int_distribution<int>(0, memory_size - 1)(gen);
-                double mu_F = (r == memory_size - 1) ? 0.9 : M_F[r];
-                double mu_CR = (r == memory_size - 1) ? 0.9 : M_CR[r];
+                double mu_F = r == memory_size - 1 ? 0.9 : MF[r];
+                double mu_CR = r == memory_size - 1 ? 0.9 : MCR[r];
 
-                double CR = clamp(norm_dist(gen) * 0.1 + mu_CR, 0.0, 1.0);
+                normal_distribution<double> dist_cr(mu_CR, 0.1);
+                double CR = clamp(dist_cr(gen), 0.0, 1.0);
                 if (eval_amt > 0.75 * tot_amt && CR < 0.7) CR = 0.7;
                 else if (eval_amt > 0.5 * tot_amt && CR < 0.6) CR = 0.6;
 
                 double F;
                 do {
-                    F = mu_F +
-                        0.1 * tan(3.14159265358979323846 * (dis(gen) - 0.5));
+                    F = mu_F + 0.1 * tan(M_PI * (dis(gen) - 0.5));
                 } while (F <= 0.0);
                 F = min(F, 1.0);
                 if (eval_amt > 0.4 * tot_amt && F > 0.7) F = 0.7;
@@ -122,14 +127,14 @@ public:
                 while (eval_amt > 0.5 * tot_amt && pbest == i)
                     pbest = sorted_idx[uniform_int_distribution<int>(0, p_num - 1)(gen)];
 
-                int r1, r2;
-                do { r1 = uniform_int_distribution<int>(0, pop_size - 1)(gen); } while (r1 == i);
+                int a, b;
+                do { a = uniform_int_distribution<int>(0, pop_size - 1)(gen); } while (a == i);
                 do {
-                    r2 = uniform_int_distribution<int>(0, pop_size + archive.size() - 1)(gen);
-                } while (r2 == i || r2 == r1);
+                    b = uniform_int_distribution<int>(0, pop_size + archive.size() - 1)(gen);
+                } while (b == i || b == a);
 
-                gene_t xr1 = population[r1].genes;
-                gene_t xr2 = (r2 < pop_size ? population[r2].genes : archive[r2 - pop_size].genes);
+                gene_t &xr1 = population[a].genes;
+                gene_t &xr2 = (b < pop_size ? population[b].genes : archive[b - pop_size].genes);
 
                 double jF = F * (eval_amt > 0.8 * tot_amt ? 0.7 : eval_amt > 0.6 * tot_amt ? 0.8 : 1.2);
 
@@ -138,57 +143,66 @@ public:
                     vi[j] = population[i].genes[j] +
                             jF * (population[pbest].genes[j] - population[i].genes[j]) +
                             F * (xr1[j] - xr2[j]);
+                    vi[j] = bound(vi[j], population[i].genes[j]);
                 }
-
-                vi = bound(vi, population[i].genes);
 
                 gene_t ui = population[i].genes;
                 int R = uniform_int_distribution<int>(0, dim - 1)(gen);
-                for (int j = 0; j < dim; ++j) {
+                for (int j = 0; j < dim; ++j)
                     if (dis(gen) < CR || j == R) ui[j] = vi[j];
-                }
 
-                double trial_fitness = evaluate(ui);
-                if (trial_fitness - 0.0 < epsilon) trial_fitness = 0.0;
+                double trial_fit = evaluate(ui);
 
-                if (trial_fitness < population[i].fitness) {
-                    new_population.push_back({ui, trial_fitness});
+                if (trial_fit < population[i].fitness) {
+                    new_population.push_back({ui, trial_fit});
                     archive.push_back(population[i]);
                     S_F.push_back(F);
                     S_CR.push_back(CR);
-                    delta_f.push_back(abs(population[i].fitness - trial_fitness));
-                    if (trial_fitness < best_one.fitness) best_one = {ui, trial_fitness};
+                    delta_fitness.push_back(abs(population[i].fitness - trial_fit));
+                    if (trial_fit < best_one.fitness)
+                        best_one = {ui, trial_fit};
                 } else {
                     new_population.push_back(population[i]);
                 }
             }
 
             if (!S_F.empty()) {
-                double sum_dF = accumulate(delta_f.begin(), delta_f.end(), 0.0);
-                double wSF = 0.0, wCR = 0.0, wsF = 0.0, wsCR = 0.0;
-                for (size_t i = 0; i < S_F.size(); ++i) {
-                    double w = delta_f[i] / sum_dF;
-                    wSF += w * S_F[i] * S_F[i];
-                    wsF += w * S_F[i];
-                    wCR += w * S_CR[i] * S_CR[i];
-                    wsCR += w * S_CR[i];
+                double sum_df = accumulate(delta_fitness.begin(), delta_fitness.end(), 0.0);
+                if (sum_df > 1e-12) {
+                    double mf_new = 0, Fw_denom = 0, mcr_new = 0, wsum = 0;
+                    for (size_t k = 0; k < S_F.size(); ++k) {
+                        double w = delta_fitness[k] / sum_df;
+                        wsum += w;
+                        mf_new += w * S_F[k] * S_F[k];
+                        Fw_denom += w * S_F[k];
+                        mcr_new += w * S_CR[k];
+                    }
+                    MF[H_idx] = mf_new / (Fw_denom + 1e-12);
+                    MCR[H_idx] = mcr_new / wsum;
+                    H_idx = (H_idx + 1) % memory_size;
                 }
-                M_F[memory_pos] = wSF / wsF;
-                M_CR[memory_pos] = wsCR == 0 ? -1 : wCR / wsCR;
-                memory_pos = (memory_pos + 1) % memory_size;
-                S_F.clear(); S_CR.clear(); delta_f.clear();
             }
 
-            int planned_size = int(round(((double)(min_pop_size - pop_size) / tot_amt) * (tot_amt - eval_amt) + pop_size));
+            int planned_size = init_pop_size - (init_pop_size - min_pop_size) *
+                                              (double)(tot_amt - eval_amt) /
+                                              tot_amt;
             if ((int)new_population.size() > planned_size) {
-                sort(new_population.begin(), new_population.end(), [](const individual &a, const individual &b) {
+                ranges::sort(new_population, [](const individual &a, const individual &b) {
                     return a.fitness < b.fitness;
                 });
                 new_population.resize(planned_size);
             }
-            if ((int)archive.size() > arc_size) archive.resize(arc_size);
+
             population = new_population;
             pop_size = population.size();
+            arc_size = pop_size * arc_rate;
+
+            if ((int)archive.size() > arc_size) {
+                shuffle(archive.begin(), archive.end(), gen);
+                archive.resize(arc_size);
+            }
+
+            
         }
 
         return best_one.fitness;
@@ -211,7 +225,7 @@ void run_task(int func_num, int dim, int times, const string &func_name) {
         lock_guard<mutex> lock(io_mutex);
         cout << func_name << " with " << dim << " has started." << endl;
     }
-    for (int i = 0; i < 30; ++i) {
+    for (int i = 0; i < times; ++i) {
         JSO JSO_(dim, func_num);
         double res = JSO_.apply();
         f << res << endl;
